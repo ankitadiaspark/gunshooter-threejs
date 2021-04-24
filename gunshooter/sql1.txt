@@ -1,0 +1,20 @@
+SELECT 
+Customers.CustomerName,
+Products.ProductName,
+Orders.OrderID,
+Products.Price*
+OrderDetails.Quantity AS ProductAmount
+FROM
+Customers 
+INNER JOIN
+Orders on 
+Customers.CustomerId=Orders.CustomerId
+INNER JOIN
+OrderDetails
+on
+OrderDetails.OrderID=Orders.OrderID
+INNER JOIN 
+Products
+on 
+Products.ProductID=OrderDetails.ProductID
+ORDER BY 4 DESC LIMIT 5;

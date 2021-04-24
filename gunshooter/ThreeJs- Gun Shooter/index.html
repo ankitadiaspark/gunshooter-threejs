@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<title>My first three.js app</title>
+	<style>
+		body {
+			margin: 0;
+			cursor: crosshair;
+		}
+
+		#container,
+		canvas {
+			width: 100vw;
+			height: 100vh;
+			display: block
+		}
+	</style>
+</head>
+
+<body>
+	<div id="container">
+
+	</div>
+	<script src="Js/three.js"></script>
+	<script src="Js/orbitControls.js"></script>
+	<script src="Js/OBJLoader.js"></script>
+	<script src="Js/DDSLoader.js"></script>
+	<script src="Js/sky.js"></script>
+	<script src="Js/GLTFLoader.js"></script>
+	<script src="Js/decalGeometry.js"></script>
+	<script src="Js/skeletonUtils.js"></script>
+	<script src="Js/MD2Loader.js"></script>
+	<script src="Js/MD2Character.js"></script>
+	<script>
+		let scene, camera, renderer, mesh, container, light, controls, meshGroup, isMouseButtonDown = false, isMouseMove = false, selectedObject = null;
+		let alienAnimationMixer = [], clock, gunObj;
+		let alienAnimationAction = [];
+		let alienCharacter;
+		let bullets = [];
+		const bulletSpeed = 100;
+		const runFactor = 0.1;
+		let gunVector = new THREE.Vector3();
+		let textureLoader = new THREE.TextureLoader();
+		let raycaster = new THREE.Raycaster();
+		let mouseVector = new THREE.Vector3();
+
+		let testSphereMesh;
+
+		function init() {
+			container = document.getElementById("container");
+			clock = new THREE.Clock();
+
+			scene = new THREE.Scene();
+			scene.background = new THREE.Color('skyblue');
+
+			createCamera();
+			createMeshes();
+			createLight();
+			createMouseHelper();
+			createGunMeshes();
+			createSky();
+			// createAlien();
+			createAlien2();
+			createRenderer();
+			createControls();
+
+			renderer.setAnimationLoop(() => {
+				render();
+				update();
+			})
+		}
+
+		function createCamera() {
+			camera = new THREE.PerspectiveCamera(25, container.clientWidth / container.clientHeight, 1, 1000);
+			camera.position.set(-3, 2, 10);
+			scene.add(camera);
+		}
+
+		function createMeshes() {
+			meshGroup = new THREE.Group();
+			const geometry = new THREE.BoxBufferGeometry(2, 2, 2);
+			const material = new THREE.MeshStandardMaterial({ color: 'purple' });
+
+			const planeMap = textureLoader.load('images/moon_img.jpg');
+			const planeGeometry = new THREE.PlaneBufferGeometry(100, 100);
+			planeGeometry.rotateX(- Math.PI / 2);
+			const planeMaterial = new THREE.MeshBasicMaterial({ map: planeMap });
+			const planeMesh = new THREE.Mesh(planeGeometry, planeMaterial);
+			testMesh = planeMesh;
+			meshGroup.add(planeMesh);
+
+			testSphereMesh = new THREE.Mesh(
+				new THREE.SphereBufferGeometry(0.2, 8, 8).rotateX(Math.PI / 2),
+				new THREE.MeshBasicMaterial({ color: 0x000000 })
+			);
+			scene.add(testSphereMesh);
+
+			mesh = new THREE.Mesh(geometry.clone(), material.clone());
+			mesh.position.set(2, 1, 2);
+			meshGroup.add(mesh);
+			mesh = new THREE.Mesh(geometry.clone(), material.clone());
+			mesh.position.set(-2, 1, 2);
+			meshGroup.add(mesh);
+			mesh = new THREE.Mesh(geometry.clone(), material.clone());
+			mesh.position.set(-4, 2, 2);
+			meshGroup.position.set(4, 0, 0);
+			meshGroup.add(mesh);
+			scene.add(meshGroup);
+		}
+
+		function createGunMeshes() {
+			let gunMaterial = new THREE.MeshStandardMaterial();
+			new THREE.OBJLoader()
+				.setPath('models/obj/cerberus/')
+				.load('Cerberus.obj', function (group) {
+					gunMaterial.roughness = 1; // attenuates roughnessMap
+					gunMaterial.metalness = 1; // attenuates metalnessMap
+					gunMaterial.map = textureLoader.load('models/obj/cerberus/Cerberus_A.jpg');
+					// roughness is in G channel, metalness is in B channel
+					gunMaterial.metalnessMap = gunMaterial.roughnessMap = textureLoader.load('models/obj/cerberus/Cerberus_RM.jpg');
+					gunMaterial.normalMap = textureLoader.load('models/obj/cerberus/Cerberus_N.jpg');
+					gunMaterial.map.wrapS = THREE.RepeatWrapping;
+					gunMaterial.roughnessMap.wrapS = THREE.RepeatWrapping;
+					gunMaterial.metalnessMap.wrapS = THREE.RepeatWrapping;
+					gunMaterial.normalMap.wrapS = THREE.RepeatWrapping;
+					gunMaterial.name = 'gunMaterial';
+					group.traverse(function (child) {
+						if (child instanceof THREE.Mesh) {
+							child.material = gunMaterial;
+						}
+					});
+					group.name = "gunGroup";
+					group.position.set(0, -0.15, -1.5);
+					group.scale.set(0.3, 0.3, 0.3);
+					gunObj = group;
+					camera.add(group);
+				});
+		}
+
+		function createLight() {
+			light = new THREE.DirectionalLight(0xffffff, 3.5);
+			light.position.set(0, 10, -5);
+			scene.add(light);
+		}
+
+		function createSky() {
+			// Add Sky
+			const sky = new THREE.Sky();
+			sky.scale.setScalar(200);
+			sky.name = 'Sky';
+			scene.add(sky);
+			meshGroup.add(sky);
+			// Add Sun Helper
+			const sunSphere = new THREE.Mesh(
+				new THREE.SphereBufferGeometry(20000, 16, 8),
+				new THREE.MeshBasicMaterial({ color: 0xffffff })
+			);
+			sunSphere.position.y = - 700000;
+			sunSphere.visible = false;
+			scene.add(sunSphere);
+
+			const effectController = {
+				turbidity: 10,
+				rayleigh: 2,
+				mieCoefficient: 0.005,
+				mieDirectionalG: 0.8,
+				luminance: 1,
+				inclination: 0.49, // elevation / inclination
+				azimuth: 0.25, // Facing front,
+				sun: ! true
+			};
+			const distance = 400000;
+
+			const uniforms = sky.material.uniforms;
+			uniforms["turbidity"].value = effectController.turbidity;
+			uniforms["rayleigh"].value = effectController.rayleigh;
+			uniforms["luminance"].value = effectController.luminance;
+			uniforms["mieCoefficient"].value = effectController.mieCoefficient;
+			uniforms["mieDirectionalG"].value = effectController.mieDirectionalG;
+			const theta = Math.PI * (effectController.inclination - 0.5);
+			const phi = 2 * Math.PI * (effectController.azimuth - 0.5);
+			sunSphere.position.x = distance * Math.cos(phi);
+			sunSphere.position.y = distance * Math.sin(phi) * Math.sin(theta);
+			sunSphere.position.z = distance * Math.sin(phi) * Math.cos(theta);
+			sunSphere.visible = effectController.sun;
+			uniforms["sunPosition"].value.copy(sunSphere.position);
+
+		}
+
+		function createRenderer() {
+			renderer = new THREE.WebGLRenderer({ antialias: true });
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setSize(container.clientWidth, container.clientHeight);
+			container.appendChild(renderer.domElement);
+		}
+
+		function createControls() {
+			controls = new THREE.OrbitControls(camera, container);
+			// controls.autoRotate = true;
+			controls.enableDamping = true;
+			controls.enableRotate = true;
+			controls.maxDistance = 30;
+			controls.enableZoom = false;
+			// controls.screenSpacePanning = true;
+			controls.target = new THREE.Vector3(0, 4, 0);
+			controls.minPolarAngle = Math.PI / 2;
+			controls.maxPolarAngle = Math.PI / 2;
+
+			controls.keys = {
+				LEFT: 65,//		LEFT: 37, //left arrow
+				UP: 87, //UP: 38, // up arrow
+				RIGHT: 68, //RIGHT: 39, // right arrow
+				BOTTOM: 83 //BOTTOM: 40 // down arrow
+			}
+			// scene.add(controls);
+		}
+
+		function createAlien() {
+			const model = { name: "Soldier" };
+			const loader = new THREE.GLTFLoader();
+			const modelName = "models/gltf/" + model.name + ".glb";
+
+			loader.load(modelName, function (gltf) {
+				model.animations = gltf.animations;
+				model.scene = gltf.scene;
+				gltf.scene.traverse(function (object) {
+					if (object.isMesh) {
+						object.castShadow = true;
+					}
+				});
+
+				const unit = {
+					modelName: "Soldier",
+					meshName: "vanguard_Mesh",
+					position: { x: 0, y: 0, z: 5 },
+					scale: 2.5,
+					animationName: "Run",
+					rotation: { x: 0, y: 0, z: 0 }
+				};
+
+				const animationActionWeight = {
+					idleAction: 0.0,
+					walkAction: 1.0,
+					runAction: 0.0
+				}
+
+				for (let soldierCnt = 0; soldierCnt < 3; soldierCnt++) {
+					let clonedScene = THREE.SkeletonUtils.clone(model.scene);
+					let clonedMesh = clonedScene.getObjectByName(unit.meshName);
+					let alienAnimationAction = [];
+					if (clonedScene) {
+						if (clonedMesh) {
+							alienAnimationMixer.push(new THREE.AnimationMixer(clonedMesh));
+							alienAnimationAction['idleAction'] = alienAnimationMixer[soldierCnt].clipAction(model.animations[0]);
+							alienAnimationAction['runAction'] = alienAnimationMixer[soldierCnt].clipAction(model.animations[1]);
+							alienAnimationAction['tPoseAction'] = alienAnimationMixer[soldierCnt].clipAction(model.animations[2]);
+							alienAnimationAction['walkAction'] = alienAnimationMixer[soldierCnt].clipAction(model.animations[3]);
+
+							for (action in alienAnimationAction) {
+								alienAnimationAction[action].enabled = true;
+								alienAnimationAction[action].setEffectiveTimeScale(1);
+								alienAnimationAction[action].setEffectiveWeight(animationActionWeight[action]);
+								alienAnimationAction[action].play();
+							}
+							prepareCrossFade(alienAnimationAction['walkAction'], alienAnimationAction['runAction'], 1);
+							clonedMesh.userData.hitCount = 0;
+							clonedMesh.userData.soldierNum = soldierCnt + 1;
+							clonedMesh.userData.animationAction = alienAnimationAction;
+
+							if (unit.position) {
+								let radius = 50;
+								let x = Math.floor(Math.random() * radius * 2) - radius;
+								let z = Math.sqrt(Math.pow(radius, 2) - Math.pow(x, 2)) * (Math.random() < 0.5 ? -1 : 1);
+								clonedScene.position.set(x, unit.position.y, z);
+							}
+
+							if (unit.scale) {
+								clonedScene.scale.set(unit.scale, unit.scale, unit.scale);
+							}
+
+							if (unit.rotation) {
+								clonedScene.rotation.x = unit.rotation.x;
+								clonedScene.rotation.y = unit.rotation.y;
+								clonedScene.rotation.z = unit.rotation.z;
+							}
+						}
+						clonedScene.name = 'alienScene';
+						scene.add(clonedScene);
+					}
+				}
+			});
+		}
+
+		function createAlien2() {
+			const config = {
+				baseUrl: "models/md2/ratamahatta/",
+				body: "ratamahatta.md2",
+				skins: ["ratamahatta.png", "ctf_b.png", "ctf_r.png", "dead.png", "gearwhore.png"],
+				weapons: [["weapon.md2", "weapon.png"],
+				["w_bfg.md2", "w_bfg.png"],
+				["w_blaster.md2", "w_blaster.png"],
+				["w_chaingun.md2", "w_chaingun.png"],
+				["w_glauncher.md2", "w_glauncher.png"],
+				["w_hyperblaster.md2", "w_hyperblaster.png"],
+				["w_machinegun.md2", "w_machinegun.png"],
+				["w_railgun.md2", "w_railgun.png"],
+				["w_rlauncher.md2", "w_rlauncher.png"],
+				["w_shotgun.md2", "w_shotgun.png"],
+				["w_sshotgun.md2", "w_sshotgun.png"]
+				]
+			};
+
+			const animationTypes = {
+				stand: ['stand', 'flip', 'salute', 'taunt', 'wave', 'point', 'crstand'],
+				move: ['run', 'jump', 'crwalk'],
+				pain: ['pain', 'crpain'],
+				attack: ['attack', 'crattack'],
+				death: ['crdeath', 'death']
+			}
+
+			alienCharacter = new THREE.MD2Character();
+			alienCharacter.scale = 0.1;
+			alienCharacter.onLoadComplete = function () {
+				alienCharacter.setAnimation(animationTypes.stand[Math.floor(Math.random() * animationTypes.stand.length)]);
+				alienCharacter.setWeapon(Math.floor(Math.random() * (alienCharacter.weapons.length)));
+				alienCharacter.setSkin(Math.floor(Math.random() * (alienCharacter.skinsBody.length)));
+
+				setTimeout(function () {
+					let clipName = animationTypes.move[Math.floor(Math.random() * animationTypes.move.length)];
+					alienCharacter.setAnimation(clipName);
+				}, 10000);
+				meshGroup.add(alienCharacter.root);
+			};
+
+			alienCharacter.loadParts(config);
+			let radius = 50;
+			let x = Math.floor(Math.random() * radius * 2) - radius;
+			let z = Math.sqrt(Math.pow(radius, 2) - Math.pow(x, 2)) * (Math.random() < 0.5 ? -1 : 1);
+			alienCharacter.root.position.set(x, 0, z);
+			alienCharacter.root.lookAt(gunVector);
+			alienCharacter.userData = animationTypes;
+			alienCharacter.root.name = "alienScene2";
+			scene.add(alienCharacter.root);
+		}
+
+		function createBullets(intersectionPoints) {
+			let bulletMesh = new THREE.Mesh(new THREE.SphereBufferGeometry(0.03, 8, 8), new THREE.MeshStandardMaterial({ color: 'white' }));
+			bulletMesh.alive = true;
+			setTimeout(function () {
+				scene.remove(bulletMesh);
+				bulletMesh.alive = true;
+			}, 1000);
+			scene.add(bulletMesh);
+			scene.updateMatrixWorld(true);
+
+			let position = new THREE.Vector3();
+			position.setFromMatrixPosition(gunObj.matrixWorld);
+			bulletMesh.position.set(
+				position.x,
+				position.y,
+				position.z
+			);
+
+			bulletMesh.velocity = new THREE.Vector3(
+				intersectionPoints.x / bulletSpeed,
+				(intersectionPoints.y - 4) / bulletSpeed,
+				intersectionPoints.z / bulletSpeed
+			);
+			bullets.push(bulletMesh);
+		}
+
+		function render() {
+			renderer.render(scene, camera);
+		}
+
+		function update() {
+			let x, z, cal;
+
+			controls.update();
+			let clockDelta = clock.getDelta();
+
+			alienCharacter.update(clockDelta);
+			if (alienCharacter.meshBody && alienCharacter.meshBody.activeAction) {
+				if (alienCharacter.userData.move.includes(alienCharacter.meshBody.activeAction._clip.name)) {
+					x = Math.abs(alienCharacter.root.position.x);
+					z = Math.abs(alienCharacter.root.position.z);
+					if (x > 5 || z > 5) {
+						cal = x / (x + z) * 100;
+						cal = cal * runFactor / 100;
+						x = (alienCharacter.root.position.x > 0) ? alienCharacter.root.position.x - cal : alienCharacter.root.position.x + cal;
+						z = (alienCharacter.root.position.z > 0) ? alienCharacter.root.position.z - (runFactor - cal) : alienCharacter.root.position.z + (runFactor - cal);
+						alienCharacter.root.position.set(
+							x,
+							2.5,
+							z
+						);
+					} else {
+						alienCharacter.setAnimation(alienCharacter.userData.attack[Math.floor(Math.random() * alienCharacter.userData.attack.length)]);
+					}
+				}
+			}
+
+			if (alienAnimationMixer) {
+				alienAnimationMixer.forEach(function (mixer) {
+					mixer.update(clockDelta);
+				});
+				for (let cnt = 1, len = scene.children.length; cnt < len; cnt++) {
+					if (scene.children[cnt].name == 'alienScene') {
+						gunVector.subVectors(scene.children[cnt].position, camera.position).add(scene.children[cnt].position);
+						scene.children[cnt].lookAt(gunVector);
+
+						x = Math.abs(scene.children[cnt].position.x);
+						z = Math.abs(scene.children[cnt].position.z);
+
+						cal = x / (x + z) * 100;
+						cal = cal * runFactor / 100;
+						x = (scene.children[cnt].position.x > 0) ? scene.children[cnt].position.x - cal : scene.children[cnt].position.x + cal;
+						z = (scene.children[cnt].position.z > 0) ? scene.children[cnt].position.z - (runFactor - cal) : scene.children[cnt].position.z + (runFactor - cal);
+						scene.children[cnt].position.set(
+							x,
+							0,
+							z
+						);
+					}
+				}
+			}
+
+			bullets.forEach(function (bulletMesh, index) {
+				if (bulletMesh) {
+					if (bulletMesh.alive == false) {
+						bullets.splice(index, 1);
+					} else {
+						bulletMesh.position.add(bulletMesh.velocity);
+					}
+				}
+			});
+		}
+
+		function onWindowResize() {
+			renderer.setSize(container.clientWidth, container.clientHeight);
+			camera.aspect = container.clientWidth / container.clientHeight;
+			camera.updateProjectionMatrix();
+		}
+
+		function onMouseMove(event) {
+			event.preventDefault();
+			let wValue, nWValue, hValue, nHValue;
+			wValue = ((container.clientWidth - event.clientX) / container.clientWidth) * 100;
+			nWValue = ((wValue * 1.5) / 100) - 0.75;
+			hValue = ((container.clientHeight - event.clientY) / container.clientHeight) * 100;
+			nHValue = (hValue / 100) - 0.4;
+			if (gunObj) {
+				gunObj.rotation.set(nHValue, nWValue, 0);
+			}
+
+			if (isMouseButtonDown) {
+				isMouseMove = true;
+			}
+		}
+
+		function onMouseDown(event) {
+			isMouseButtonDown = true;
+		}
+
+		function getIntersects(x, y) {
+			x = (x / container.clientWidth) * 2 - 1;
+			y = - (y / container.clientHeight) * 2 + 1;
+			mouseVector.set(x, y, 0.5);
+			raycaster.setFromCamera(mouseVector, camera);
+			return raycaster.intersectObject(meshGroup, true);
+		}
+
+		function onMouseUp(event) {
+			if (!isMouseMove) {
+				if (selectedObject) {
+					selectedObject = null;
+				}
+				let intersects = getIntersects(event.layerX, event.layerY);
+				if (intersects.length > 0) {
+
+					let res = intersects.filter(function (res) {
+						return res && res.object;
+					})[0];
+					if (res && res.object) {
+						selectedObject = res.object;
+						mouseHelper.position.copy(res.point);
+						intersection.point.copy(res.point);
+
+						let selectedObjectNormal = res.face.normal.clone();
+						selectedObjectNormal.transformDirection(meshGroup.matrixWorld);
+						selectedObjectNormal.multiplyScalar(10);
+						selectedObjectNormal.add(res.point);
+						intersection.normal.copy(res.face.normal);
+						mouseHelper.lookAt(selectedObjectNormal);
+						shoot(selectedObject);
+					}
+				}
+
+				if (intersects.length > 0) {
+					intersects.forEach(function (obj) {
+						if (obj.object.name == 'Sky') {
+							createBullets(obj.point);
+						}
+					});
+				}
+			}
+			isMouseButtonDown = false;
+			isMouseMove = false;
+		}
+
+		let intersection = {
+			intersects: false,
+			point: new THREE.Vector3(),
+			normal: new THREE.Vector3(),
+			rotation: new THREE.Vector3()
+		};
+
+		let decalDiffuse = textureLoader.load('images/decal/decal-diffuse.png');
+		let decalNormal = textureLoader.load('images/decal/decal-normal.jpg');
+
+		let decalMaterial = new THREE.MeshPhongMaterial({
+			specular: 0x444444,
+			map: decalDiffuse,
+			normalMap: decalNormal,
+			normalScale: new THREE.Vector2(1, 1),
+			shininess: 30,
+			transparent: true,
+			depthTest: true,
+			depthWrite: false,
+			polygonOffset: true,
+			polygonOffsetFactor: - 4,
+			wireframe: false
+		});
+
+		let params = {
+			minScale: 1,
+			maxScale: 1,
+			rotate: true,
+			clear: function () {
+				removeDecals();
+			}
+		};
+
+		let position = new THREE.Vector3();
+		let orientation = new THREE.Euler();
+		let size = new THREE.Vector3(10, 10, 10);
+		let mouseHelper;
+		let decals = [];
+
+		function shoot(meshObj) {
+			position.copy(intersection.point);
+			orientation.copy(mouseHelper.rotation);
+			if (params.rotate) orientation.z = Math.random() * 2 * Math.PI;
+
+			let scale = params.minScale + Math.random() * (params.maxScale - params.minScale);
+			size.set(scale, scale, scale);
+
+			let material = decalMaterial.clone();
+			material.color.setHex(0x000000);
+			if (meshObj.type == 'SkinnedMesh') {
+				if (meshObj.userData.hitCount == 0) {
+					prepareCrossFade(meshObj.userData.animationAction['runAction'], meshObj.userData.animationAction['walkAction'], 2);
+				} else if (meshObj.userData.hitCount == 1) {
+					prepareCrossFade(meshObj.userData.animationAction['walkAction'], meshObj.userData.animationAction['idleAction'], 2);
+				}
+				meshObj.userData.hitCount += 1;
+			} else {
+				if (meshObj.activeAction) {
+					if (alienCharacter.meshBody) {
+						if (alienCharacter.userData.move.includes(alienCharacter.meshBody.activeAction._clip.name)) {
+							alienCharacter.setAnimation(alienCharacter.userData.pain[Math.floor(Math.random() * alienCharacter.userData.pain.length)]);
+							let obj = alienCharacter.meshBody.geometry.animations.find((obj) => {
+								return obj.name === alienCharacter.meshBody.activeAction._clip.name;
+							});
+							let randomNum = Math.random() * 100;
+							if (randomNum < 60 && randomNum > 40) {
+								setTimeout(function () {
+									alienCharacter.setAnimation(alienCharacter.userData.death[Math.floor(Math.random() * alienCharacter.userData.death.length)]);
+									setTimeout(function () {
+										alienCharacter.meshBody.activeAction.setLoop(THREE.LoopOnce);
+										alienCharacter.meshBody.activeAction.clampWhenFinished = true;
+										alienCharacter.meshWeapon.activeAction.setLoop(THREE.LoopOnce);
+										alienCharacter.meshWeapon.activeAction.clampWhenFinished = true;
+										setTimeout(function () {
+											scene.remove(alienCharacter.root);
+											meshGroup.remove(alienCharacter.root);
+											createAlien2();
+										}, 2000);
+									}, 1000);
+								}, obj.duration * 5000);
+							} else {
+								setTimeout(function () {
+									alienCharacter.setAnimation(alienCharacter.userData.move[Math.floor(Math.random() * alienCharacter.userData.move.length)]);
+								}, obj.duration * 1000);
+							}
+						}
+					}
+				}
+				let decalMesh = new THREE.Mesh(new THREE.DecalGeometry(meshObj, position, orientation, size), material);
+				decals.push(decalMesh);
+				scene.add(decalMesh);
+			}
+		}
+
+		function createMouseHelper() {
+			mouseHelper = new THREE.Mesh(new THREE.BoxBufferGeometry(1, 1, 10), new THREE.MeshNormalMaterial());
+			mouseHelper.visible = false;
+			scene.add(mouseHelper);
+		}
+
+		function prepareCrossFade(startAction, endAction, defaultDuration) {
+			endAction.enabled = true;
+			endAction.setEffectiveTimeScale(1);
+			endAction.setEffectiveWeight(1);
+			endAction.time = 0;
+			startAction.crossFadeTo(endAction, defaultDuration, true);
+		}
+
+		window.addEventListener('resize', onWindowResize);
+		window.addEventListener('mousedown', onMouseDown);
+		window.addEventListener('mouseup', onMouseUp);
+		window.addEventListener('mousemove', onMouseMove);
+		init();
+	</script>
+</body>
+
+</html>
